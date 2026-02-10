@@ -12,7 +12,9 @@ const ALLOWED_HOTEL_FIELDS = [
   'ratingVotes',
   'available_rooms',
   'amenities',
-  'imageUrl'
+  'imageUrl',
+  'ratingTotal',
+  'recentRatings'
 ];
 
 const getHotelsCollection = () => getDb().collection(HOTEL_COLLECTION);
@@ -91,6 +93,23 @@ const buildProjectionFromQuery = (fields = '') => {
   return Object.keys(projection).length > 0 ? projection : null;
 };
 
+const normalizeAmenitiesList = (value) => {
+  const source = Array.isArray(value) ? value : [value];
+  const unique = new Set();
+
+  source
+    .flatMap((item) => String(item || '').split(','))
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((item) => {
+      if (item.length <= 40) {
+        unique.add(item);
+      }
+    });
+
+  return Array.from(unique);
+};
+
 const findHotels = async ({ filter = {}, sort = {}, projection = null, skip = 0, limit = 10 }) => {
   const options = projection ? { projection } : {};
   const collection = getHotelsCollection();
@@ -116,10 +135,18 @@ const findHotelById = async (id, projection = null) => {
 
 const createHotel = async (hotel, userId) => {
   const now = new Date();
+  const initialVotes = Number.isInteger(hotel.ratingVotes)
+    ? Math.max(hotel.ratingVotes, 0)
+    : 1;
+  const initialTotal = Number.isFinite(Number(hotel.ratingTotal))
+    ? Number(hotel.ratingTotal)
+    : (Number(hotel.rating) || 0) * initialVotes;
+
   const result = await getHotelsCollection().insertOne({
     ...hotel,
-    ratingVotes: Number.isInteger(hotel.ratingVotes) ? hotel.ratingVotes : 0,
-    ratingTotal: Number.isFinite(Number(hotel.ratingTotal)) ? Number(hotel.ratingTotal) : 0,
+    ratingVotes: initialVotes,
+    ratingTotal: initialTotal,
+    recentRatings: [],
     createdBy: userId ? new ObjectId(userId) : null,
     createdAt: now,
     updatedAt: now
@@ -148,7 +175,39 @@ const deleteHotelById = async (id) => {
 
 const distinctHotelCities = async () => getHotelsCollection().distinct('location');
 
-const rateHotelById = async (id, score) => {
+const updateHotelAmenitiesById = async (id, { add = [], remove = [] }) => {
+  if (!ObjectId.isValid(id)) {
+    return { matchedCount: 0 };
+  }
+
+  const addList = normalizeAmenitiesList(add);
+  const removeList = normalizeAmenitiesList(remove);
+
+  if (addList.length === 0 && removeList.length === 0) {
+    return { matchedCount: 0 };
+  }
+
+  const update = {
+    $set: {
+      updatedAt: new Date()
+    }
+  };
+
+  if (addList.length > 0) {
+    update.$addToSet = { amenities: { $each: addList } };
+  }
+
+  if (removeList.length > 0) {
+    update.$pull = { amenities: { $in: removeList } };
+  }
+
+  return getHotelsCollection().updateOne(
+    { _id: new ObjectId(id) },
+    update
+  );
+};
+
+const rateHotelById = async (id, score, userId = null) => {
   if (!ObjectId.isValid(id)) {
     return { matchedCount: 0 };
   }
@@ -158,41 +217,95 @@ const rateHotelById = async (id, score) => {
     return { matchedCount: 0 };
   }
 
+  const now = new Date();
   const collection = getHotelsCollection();
-  const hotel = await collection.findOne(
-    { _id: new ObjectId(id) },
-    { projection: { rating: 1, ratingTotal: 1, ratingVotes: 1 } }
+
+  await collection.updateOne(
+    { _id: new ObjectId(id), ratingTotal: { $exists: false } },
+    [
+      {
+        $set: {
+          ratingTotal: {
+            $multiply: [
+              { $ifNull: ['$rating', 0] },
+              { $ifNull: ['$ratingVotes', 0] }
+            ]
+          }
+        }
+      }
+    ]
   );
-
-  if (!hotel) {
-    return { matchedCount: 0 };
-  }
-
-  const fallbackRating = Number.isFinite(Number(hotel.rating)) ? Number(hotel.rating) : 0;
-  const currentVotes = Number.isInteger(hotel.ratingVotes) && hotel.ratingVotes > 0 ? hotel.ratingVotes : 1;
-  const currentTotal = Number.isFinite(Number(hotel.ratingTotal)) && Number(hotel.ratingTotal) > 0
-    ? Number(hotel.ratingTotal)
-    : fallbackRating;
-  const nextVotes = currentVotes + 1;
-  const nextTotal = currentTotal + numericScore;
-  const nextRating = Number((nextTotal / nextVotes).toFixed(1));
 
   const result = await collection.updateOne(
     { _id: new ObjectId(id) },
     {
+      $inc: {
+        ratingVotes: 1,
+        ratingTotal: numericScore
+      },
+      $push: {
+        recentRatings: {
+          $each: [{
+            _id: new ObjectId(),
+            score: numericScore,
+            userId: userId && ObjectId.isValid(userId) ? new ObjectId(userId) : null,
+            createdAt: now
+          }],
+          $slice: -50
+        }
+      },
       $set: {
-        rating: nextRating,
-        ratingVotes: nextVotes,
-        ratingTotal: nextTotal,
-        updatedAt: new Date()
+        updatedAt: now
       }
     }
   );
 
+  if (!result.matchedCount) {
+    return { matchedCount: 0 };
+  }
+
+  await collection.updateOne(
+    { _id: new ObjectId(id) },
+    [
+      {
+        $set: {
+          ratingVotes: { $ifNull: ['$ratingVotes', 0] },
+          ratingTotal: { $ifNull: ['$ratingTotal', 0] }
+        }
+      },
+      {
+        $set: {
+          rating: {
+            $round: [
+              {
+                $divide: [
+                  '$ratingTotal',
+                  {
+                    $cond: [
+                      { $gt: ['$ratingVotes', 0] },
+                      '$ratingVotes',
+                      1
+                    ]
+                  }
+                ]
+              },
+              1
+            ]
+          }
+        }
+      }
+    ]
+  );
+
+  const ratedHotel = await collection.findOne(
+    { _id: new ObjectId(id) },
+    { projection: { rating: 1, ratingVotes: 1 } }
+  );
+
   return {
-    matchedCount: result.matchedCount,
-    rating: nextRating,
-    ratingVotes: nextVotes
+    matchedCount: 1,
+    rating: Number(ratedHotel?.rating || 0),
+    ratingVotes: Number(ratedHotel?.ratingVotes || 0)
   };
 };
 
@@ -206,5 +319,6 @@ module.exports = {
   updateHotelById,
   deleteHotelById,
   distinctHotelCities,
+  updateHotelAmenitiesById,
   rateHotelById
 };

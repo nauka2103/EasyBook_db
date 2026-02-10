@@ -6,15 +6,22 @@ const {
   createHotelApi,
   updateHotelApi,
   deleteHotelApi,
-  rateHotelApi
+  rateHotelApi,
+  patchHotelAmenitiesApi
 } = require('../controllers/hotelController');
 const {
   getBookingsApi,
   getBookingByIdApi,
   createBookingApi,
   updateBookingApi,
-  deleteBookingApi
+  deleteBookingApi,
+  patchBookingStatusApi,
+  patchBookingHistoryNoteApi,
+  deleteBookingHistoryEntryApi
 } = require('../controllers/bookingController');
+const {
+  getAnalyticsOverviewApi
+} = require('../controllers/analyticsController');
 const { asyncHandler } = require('../middlewares/asyncHandler');
 const { requireAuth, requireRole } = require('../middlewares/auth');
 
@@ -28,12 +35,18 @@ apiRouter.post('/hotels', requireRole('admin'), asyncHandler(createHotelApi));
 apiRouter.put('/hotels/:id', requireRole('admin'), asyncHandler(updateHotelApi));
 apiRouter.delete('/hotels/:id', requireRole('admin'), asyncHandler(deleteHotelApi));
 apiRouter.post('/hotels/:id/rate', requireAuth, asyncHandler(rateHotelApi));
+apiRouter.patch('/hotels/:id/amenities', requireRole('admin'), asyncHandler(patchHotelAmenitiesApi));
 
 apiRouter.get('/bookings', requireAuth, asyncHandler(getBookingsApi));
 apiRouter.get('/bookings/:id', requireAuth, asyncHandler(getBookingByIdApi));
 apiRouter.post('/bookings', requireAuth, asyncHandler(createBookingApi));
 apiRouter.put('/bookings/:id', requireAuth, asyncHandler(updateBookingApi));
 apiRouter.delete('/bookings/:id', requireAuth, asyncHandler(deleteBookingApi));
+apiRouter.patch('/bookings/:id/status', requireAuth, asyncHandler(patchBookingStatusApi));
+apiRouter.patch('/bookings/:id/status-history/:entryId', requireAuth, asyncHandler(patchBookingHistoryNoteApi));
+apiRouter.delete('/bookings/:id/status-history/:entryId', requireAuth, asyncHandler(deleteBookingHistoryEntryApi));
+
+apiRouter.get('/analytics/overview', requireRole('admin'), asyncHandler(getAnalyticsOverviewApi));
 
 module.exports = {
   apiRouter

@@ -624,6 +624,16 @@ body {
   text-align: center;
 }
 
+table th,
+table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+table th {
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .about-hero {
   background: linear-gradient(135deg, #0f172a, #111827);
   color: #fff;

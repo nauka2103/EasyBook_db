@@ -33,6 +33,9 @@ const {
   updateBookingFromPage,
   deleteBookingFromPage
 } = require('../controllers/bookingController');
+const {
+  renderAnalyticsPage
+} = require('../controllers/analyticsController');
 const { asyncHandler } = require('../middlewares/asyncHandler');
 const { requireAuth, requireRole } = require('../middlewares/auth');
 
@@ -73,6 +76,8 @@ webRouter.get('/bookings/:id', requireAuth, asyncHandler(renderBookingDetailsPag
 webRouter.get('/bookings/:id/edit', requireAuth, asyncHandler(renderEditBookingPage));
 webRouter.post('/bookings/:id', requireAuth, asyncHandler(updateBookingFromPage));
 webRouter.post('/bookings/:id/delete', requireAuth, asyncHandler(deleteBookingFromPage));
+
+webRouter.get('/analytics', requireRole('admin'), asyncHandler(renderAnalyticsPage));
 
 module.exports = {
   webRouter

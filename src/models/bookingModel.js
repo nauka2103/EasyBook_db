@@ -2,8 +2,23 @@
 const { getDb } = require('../../database/db');
 
 const BOOKING_COLLECTION = 'bookings';
+const ALLOWED_BOOKING_STATUSES = ['confirmed', 'cancelled'];
 
 const getBookingsCollection = () => getDb().collection(BOOKING_COLLECTION);
+
+const normalizeReason = (value, maxLength = 300) => String(value || '').trim().slice(0, maxLength);
+
+const toObjectIdOrNull = (id) => (
+  id && ObjectId.isValid(id) ? new ObjectId(id) : null
+);
+
+const buildStatusHistoryEntry = ({ status, reason = '', changedBy = null }) => ({
+  _id: new ObjectId(),
+  status: ALLOWED_BOOKING_STATUSES.includes(String(status)) ? String(status) : 'confirmed',
+  reason: normalizeReason(reason, 220),
+  changedAt: new Date(),
+  changedBy: toObjectIdOrNull(changedBy)
+});
 
 const buildBookingFilterFromQuery = ({ query = {}, currentUser = null, includeAll = false }) => {
   const filter = {};
@@ -115,6 +130,7 @@ const findBookingByIdWithDetails = async (id) => {
         guests: 1,
         status: 1,
         notes: 1,
+        statusHistory: 1,
         createdAt: 1,
         updatedAt: 1,
         hotelTitle: '$hotel.title',
@@ -129,8 +145,22 @@ const findBookingByIdWithDetails = async (id) => {
 
 const createBooking = async ({ booking, userId }) => {
   const now = new Date();
+  const resolvedStatus = ALLOWED_BOOKING_STATUSES.includes(String(booking.status))
+    ? String(booking.status)
+    : 'confirmed';
+
+  const statusHistory = [
+    buildStatusHistoryEntry({
+      status: resolvedStatus,
+      reason: 'Booking created',
+      changedBy: userId
+    })
+  ];
+
   const result = await getBookingsCollection().insertOne({
     ...booking,
+    status: resolvedStatus,
+    statusHistory,
     userId: new ObjectId(userId),
     createdAt: now,
     updatedAt: now
@@ -139,14 +169,79 @@ const createBooking = async ({ booking, userId }) => {
   return result.insertedId;
 };
 
-const updateBookingById = async (id, booking) => {
+const updateBookingById = async (id, booking, { historyEntry = null } = {}) => {
   if (!ObjectId.isValid(id)) return { matchedCount: 0 };
+
+  const update = {
+    $set: {
+      ...booking,
+      updatedAt: new Date()
+    }
+  };
+
+  if (historyEntry) {
+    update.$push = { statusHistory: historyEntry };
+  }
 
   return getBookingsCollection().updateOne(
     { _id: new ObjectId(id) },
+    update
+  );
+};
+
+const updateBookingStatusById = async (id, { status, reason = '', changedBy = null }) => {
+  if (!ObjectId.isValid(id)) return { matchedCount: 0 };
+  if (!ALLOWED_BOOKING_STATUSES.includes(String(status))) return { matchedCount: 0 };
+
+  return updateBookingById(
+    id,
+    { status: String(status) },
+    {
+      historyEntry: buildStatusHistoryEntry({
+        status,
+        reason,
+        changedBy
+      })
+    }
+  );
+};
+
+const annotateBookingStatusHistoryById = async ({ id, entryId, comment, annotatedBy = null }) => {
+  if (!ObjectId.isValid(id) || !ObjectId.isValid(entryId)) {
+    return { matchedCount: 0 };
+  }
+
+  return getBookingsCollection().updateOne(
+    {
+      _id: new ObjectId(id),
+      'statusHistory._id': new ObjectId(entryId)
+    },
     {
       $set: {
-        ...booking,
+        'statusHistory.$.comment': normalizeReason(comment, 300),
+        'statusHistory.$.annotatedAt': new Date(),
+        'statusHistory.$.annotatedBy': toObjectIdOrNull(annotatedBy),
+        updatedAt: new Date()
+      }
+    }
+  );
+};
+
+const removeBookingStatusHistoryById = async ({ id, entryId }) => {
+  if (!ObjectId.isValid(id) || !ObjectId.isValid(entryId)) {
+    return { matchedCount: 0 };
+  }
+
+  return getBookingsCollection().updateOne(
+    {
+      _id: new ObjectId(id),
+      'statusHistory._id': new ObjectId(entryId)
+    },
+    {
+      $pull: {
+        statusHistory: { _id: new ObjectId(entryId) }
+      },
+      $set: {
         updatedAt: new Date()
       }
     }
@@ -164,5 +259,8 @@ module.exports = {
   findBookingByIdWithDetails,
   createBooking,
   updateBookingById,
+  updateBookingStatusById,
+  annotateBookingStatusHistoryById,
+  removeBookingStatusHistoryById,
   deleteBookingById
 };

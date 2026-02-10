@@ -10,6 +10,7 @@ const {
   updateHotelById,
   deleteHotelById,
   distinctHotelCities,
+  updateHotelAmenitiesById,
   rateHotelById
 } = require('../models/hotelModel');
 const { validateHotelPayload } = require('../utils/validation');
@@ -212,7 +213,7 @@ const renderHotelsPage = async (req, res) => {
   ).join('');
 
   const manageAction = isAdminUser(req)
-    ? '<a class="btn" href="/hotels/new">Add hotel</a>'
+    ? '<a class="btn" href="/hotels/new">Add hotel</a><a class="btn btn-outline" href="/analytics">Analytics</a>'
     : '';
 
   const bookingNotice = req.query.loginRequired === '1'
@@ -431,7 +432,7 @@ const rateHotelFromPage = async (req, res) => {
     return res.redirect(`${nextPath}${nextPath.includes('?') ? '&' : '?'}ratingError=1`);
   }
 
-  const result = await rateHotelById(req.params.id, score);
+  const result = await rateHotelById(req.params.id, score, req.currentUser?.id || null);
   if (!result.matchedCount) {
     return sendNotFoundPage(res, 404);
   }
@@ -529,7 +530,7 @@ const rateHotelApi = async (req, res) => {
     return res.status(400).json({ error: 'Invalid rating score' });
   }
 
-  const result = await rateHotelById(req.params.id, score);
+  const result = await rateHotelById(req.params.id, score, req.currentUser?.id || null);
   if (!result.matchedCount) {
     return res.status(404).json({ error: 'Not found' });
   }
@@ -538,6 +539,42 @@ const rateHotelApi = async (req, res) => {
     message: 'Rating saved',
     rating: result.rating,
     ratingVotes: result.ratingVotes
+  });
+};
+
+const patchHotelAmenitiesApi = async (req, res) => {
+  if (!ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ error: 'Invalid ID' });
+  }
+
+  const normalizeList = (value) => {
+    const source = Array.isArray(value) ? value : [value];
+    return Array.from(new Set(
+      source
+        .flatMap((item) => String(item || '').split(','))
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .filter((item) => item.length <= 40)
+    ));
+  };
+
+  const add = normalizeList(req.body.add || []);
+  const remove = normalizeList(req.body.remove || []);
+
+  if (add.length === 0 && remove.length === 0) {
+    return res.status(400).json({ error: 'Provide at least one amenity to add/remove' });
+  }
+
+  const result = await updateHotelAmenitiesById(req.params.id, { add, remove });
+  if (!result.matchedCount) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  const hotel = await findHotelById(req.params.id, { amenities: 1, updatedAt: 1 });
+  return res.status(200).json({
+    message: 'Amenities updated',
+    amenities: Array.isArray(hotel?.amenities) ? hotel.amenities : [],
+    updatedAt: hotel?.updatedAt || null
   });
 };
 
@@ -555,6 +592,7 @@ module.exports = {
   createHotelApi,
   updateHotelApi,
   deleteHotelApi,
-  rateHotelApi
+  rateHotelApi,
+  patchHotelAmenitiesApi
 };
 

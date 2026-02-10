@@ -6,6 +6,9 @@ const {
   findBookingByIdWithDetails,
   createBooking,
   updateBookingById,
+  updateBookingStatusById,
+  annotateBookingStatusHistoryById,
+  removeBookingStatusHistoryById,
   deleteBookingById
 } = require('../models/bookingModel');
 const { findHotelById, findHotels } = require('../models/hotelModel');
@@ -21,6 +24,31 @@ const notFoundPagePath = path.join(process.cwd(), 'views', '404.html');
 const sendNotFoundPage = (res, statusCode = 404) => res.status(statusCode).sendFile(notFoundPagePath);
 
 const canManageBooking = (req, booking) => canAccessOwnerResource(req, booking?.userId);
+
+const toSafeHistoryReason = (value, fallback = '') => {
+  const text = String(value || '').trim().slice(0, 220);
+  return text || fallback;
+};
+
+const buildStatusHistoryEntry = (status, reason, changedBy) => ({
+  _id: new ObjectId(),
+  status,
+  reason: toSafeHistoryReason(reason),
+  changedAt: new Date(),
+  changedBy: ObjectId.isValid(changedBy) ? new ObjectId(changedBy) : null
+});
+
+const formatDateTime = (value) => {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '-';
+  return parsed.toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
 
 const getHotelOptionsHtml = async (selectedHotelId = '') => {
   const { items: hotels } = await findHotels({
@@ -114,10 +142,14 @@ const renderBookingsPage = async (req, res) => {
   const roleNote = isAdmin(req)
     ? '<span class="chip">Extended access is enabled for this account.</span>'
     : '<span class="chip">Manage your reservations in one place.</span>';
+  const adminActions = isAdmin(req)
+    ? '<a class="btn btn-outline" href="/analytics">Analytics</a>'
+    : '';
 
   return res.send(renderView('bookings.html', {
     authControls: safeHtml(renderAuthControls(req, '/bookings')),
     roleNote: safeHtml(roleNote),
+    adminActions: safeHtml(adminActions),
     statusAllSelected: !req.query.status ? 'selected' : '',
     statusConfirmedSelected: req.query.status === 'confirmed' ? 'selected' : '',
     statusCancelledSelected: req.query.status === 'cancelled' ? 'selected' : '',
@@ -206,6 +238,26 @@ const renderBookingDetailsPage = async (req, res) => {
     </form>
   `;
 
+  const statusHistory = Array.isArray(booking.statusHistory) ? booking.statusHistory : [];
+  const historyHtml = statusHistory.length === 0
+    ? '<li>No status updates yet.</li>'
+    : statusHistory
+      .slice()
+      .reverse()
+      .map((entry) => {
+        const reason = String(entry.reason || '').trim();
+        const comment = String(entry.comment || '').trim();
+        return `
+          <li>
+            <strong>${escapeHtml(String(entry.status || '-'))}</strong>
+            <span class="chip">${escapeHtml(formatDateTime(entry.changedAt))}</span>
+            ${reason ? `<div>${escapeHtml(reason)}</div>` : ''}
+            ${comment ? `<div><em>Note:</em> ${escapeHtml(comment)}</div>` : ''}
+          </li>
+        `;
+      })
+      .join('');
+
   return res.send(renderView('bookings-item.html', {
     authControls: safeHtml(renderAuthControls(req, `/bookings/${booking._id}`)),
     id: booking._id.toString(),
@@ -217,6 +269,7 @@ const renderBookingDetailsPage = async (req, res) => {
     guests: String(booking.guests),
     status: booking.status,
     notes: booking.notes || '-',
+    statusHistory: safeHtml(historyHtml),
     actionButtons: safeHtml(actionButtons)
   }));
 };
@@ -299,7 +352,20 @@ const updateBookingFromPage = async (req, res) => {
     }));
   }
 
-  await updateBookingById(req.params.id, booking);
+  const statusChanged = Boolean(booking.status) && booking.status !== existing.status;
+  await updateBookingById(
+    req.params.id,
+    booking,
+    {
+      historyEntry: statusChanged
+        ? buildStatusHistoryEntry(
+          booking.status,
+          `Status updated by ${req.currentUser.email || 'user'} from booking edit page`,
+          req.currentUser.id
+        )
+        : null
+    }
+  );
   return res.redirect(`/bookings/${req.params.id}`);
 };
 
@@ -406,7 +472,20 @@ const updateBookingApi = async (req, res) => {
     }
   }
 
-  await updateBookingById(req.params.id, booking);
+  const statusChanged = Boolean(booking.status) && booking.status !== existing.status;
+  await updateBookingById(
+    req.params.id,
+    booking,
+    {
+      historyEntry: statusChanged
+        ? buildStatusHistoryEntry(
+          booking.status,
+          `Status updated by ${req.currentUser.email || 'user'} via API`,
+          req.currentUser.id
+        )
+        : null
+    }
+  );
   return res.status(200).json({ message: 'Updated' });
 };
 
@@ -428,6 +507,116 @@ const deleteBookingApi = async (req, res) => {
   return res.status(200).json({ message: 'Deleted' });
 };
 
+const patchBookingStatusApi = async (req, res) => {
+  if (!ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ error: 'Invalid ID' });
+  }
+
+  const nextStatus = String(req.body.status || '').trim().toLowerCase();
+  if (!['confirmed', 'cancelled'].includes(nextStatus)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+
+  const booking = await findBookingByIdWithDetails(req.params.id);
+  if (!booking) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  if (!canManageBooking(req, booking)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  if (booking.status === nextStatus) {
+    return res.status(200).json({ message: 'Status unchanged', status: booking.status });
+  }
+
+  const reason = toSafeHistoryReason(
+    req.body.reason,
+    `Status updated by ${req.currentUser.email || 'user'}`
+  );
+
+  const result = await updateBookingStatusById(req.params.id, {
+    status: nextStatus,
+    reason,
+    changedBy: req.currentUser.id
+  });
+
+  if (!result.matchedCount) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  const updated = await findBookingByIdWithDetails(req.params.id);
+  return res.status(200).json({
+    message: 'Status updated',
+    status: updated?.status || nextStatus,
+    statusHistory: updated?.statusHistory || []
+  });
+};
+
+const patchBookingHistoryNoteApi = async (req, res) => {
+  if (!ObjectId.isValid(req.params.id) || !ObjectId.isValid(req.params.entryId)) {
+    return res.status(400).json({ error: 'Invalid ID' });
+  }
+
+  const comment = String(req.body.comment || '').trim();
+  if (!comment || comment.length > 300) {
+    return res.status(400).json({ error: 'Comment is required and must be up to 300 characters' });
+  }
+
+  const booking = await findBookingByIdWithDetails(req.params.id);
+  if (!booking) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  if (!canManageBooking(req, booking)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const result = await annotateBookingStatusHistoryById({
+    id: req.params.id,
+    entryId: req.params.entryId,
+    comment,
+    annotatedBy: req.currentUser.id
+  });
+
+  if (!result.matchedCount) {
+    return res.status(404).json({ error: 'History entry not found' });
+  }
+
+  return res.status(200).json({ message: 'History note updated' });
+};
+
+const deleteBookingHistoryEntryApi = async (req, res) => {
+  if (!ObjectId.isValid(req.params.id) || !ObjectId.isValid(req.params.entryId)) {
+    return res.status(400).json({ error: 'Invalid ID' });
+  }
+
+  if (!isAdmin(req)) {
+    return res.status(403).json({ error: 'Only admin can remove history entries' });
+  }
+
+  const booking = await findBookingByIdWithDetails(req.params.id);
+  if (!booking) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  const historySize = Array.isArray(booking.statusHistory) ? booking.statusHistory.length : 0;
+  if (historySize <= 1) {
+    return res.status(400).json({ error: 'At least one history entry must remain' });
+  }
+
+  const result = await removeBookingStatusHistoryById({
+    id: req.params.id,
+    entryId: req.params.entryId
+  });
+
+  if (!result.matchedCount) {
+    return res.status(404).json({ error: 'History entry not found' });
+  }
+
+  return res.status(200).json({ message: 'History entry removed' });
+};
+
 module.exports = {
   renderBookingsPage,
   renderNewBookingPage,
@@ -440,6 +629,9 @@ module.exports = {
   getBookingByIdApi,
   createBookingApi,
   updateBookingApi,
-  deleteBookingApi
+  deleteBookingApi,
+  patchBookingStatusApi,
+  patchBookingHistoryNoteApi,
+  deleteBookingHistoryEntryApi
 };
 

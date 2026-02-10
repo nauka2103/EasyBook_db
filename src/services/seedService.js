@@ -31,9 +31,14 @@ const ensureIndexes = async () => {
     usersCollection.createIndex({ email: 1 }, { unique: true, sparse: true }),
     db.collection('hotels').createIndex({ location: 1 }),
     db.collection('hotels').createIndex({ price_per_night: 1 }),
+    db.collection('hotels').createIndex({ location: 1, price_per_night: 1, rating: -1 }),
+    db.collection('hotels').createIndex({ createdAt: -1 }),
     db.collection('contact_requests').createIndex({ createdAt: -1 }),
     db.collection('bookings').createIndex({ userId: 1, createdAt: -1 }),
-    db.collection('bookings').createIndex({ hotelId: 1, createdAt: -1 })
+    db.collection('bookings').createIndex({ userId: 1, status: 1, createdAt: -1 }),
+    db.collection('bookings').createIndex({ hotelId: 1, createdAt: -1 }),
+    db.collection('bookings').createIndex({ hotelId: 1, status: 1, createdAt: -1 }),
+    db.collection('bookings').createIndex({ createdAt: -1, status: 1 })
   ]);
 };
 

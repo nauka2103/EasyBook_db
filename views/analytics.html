@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analytics - Easy Booking</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+<header class="header">
+  <div class="container">
+    <div class="logo">Easy<span>Booking</span></div>
+    <nav class="nav">
+      <a href="/">Home</a>
+      <a href="/hotels">Hotels</a>
+      <a href="/bookings">Bookings</a>
+      <a href="/analytics">Analytics</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="/login">Login</a>
+      <a href="/register">Register</a>
+    </nav>
+  </div>
+</header>
+
+<section class="features">
+  <div class="container">
+    <h2 style="text-align:center;">Bookings Analytics</h2>
+
+    <div class="auth-block">
+      {{authControls}}
+    </div>
+
+    <div class="form-card" style="max-width: 860px;">
+      <form id="analyticsForm" class="contact-form">
+        <div class="form-group">
+          <label for="months">Time window (months)</label>
+          <input id="months" name="months" type="number" min="1" max="24" value="{{initialMonths}}" />
+        </div>
+        <button type="submit" class="btn btn-full">Load analytics</button>
+      </form>
+    </div>
+
+    <div id="analyticsError" class="notice notice-warning" style="display:none; max-width: 860px; margin: 14px auto 0;"></div>
+
+    <div id="analyticsSummary" class="features-grid" style="margin-top: 20px;">
+      <div class="feature-card"><h3>Total bookings</h3><p id="summaryTotal">-</p></div>
+      <div class="feature-card"><h3>Confirmed</h3><p id="summaryConfirmed">-</p></div>
+      <div class="feature-card"><h3>Cancelled</h3><p id="summaryCancelled">-</p></div>
+      <div class="feature-card"><h3>Estimated revenue</h3><p id="summaryRevenue">-</p></div>
+    </div>
+
+    <div class="form-card" style="max-width: 980px; margin-top: 20px;">
+      <h3 style="margin-bottom: 12px;">Top hotels (by confirmed bookings)</h3>
+      <div id="topHotelsTableWrap" style="overflow-x:auto;">
+        <table id="topHotelsTable" style="width:100%; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left; padding:8px;">Hotel</th>
+              <th style="text-align:left; padding:8px;">Location</th>
+              <th style="text-align:right; padding:8px;">Bookings</th>
+              <th style="text-align:right; padding:8px;">Confirmed</th>
+              <th style="text-align:right; padding:8px;">Revenue</th>
+            </tr>
+          </thead>
+          <tbody id="topHotelsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="form-card" style="max-width: 980px; margin-top: 20px;">
+      <h3 style="margin-bottom: 12px;">Monthly trend</h3>
+      <div id="monthRows" class="chip-row" style="justify-content:flex-start;"></div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <p>Copyright 2026 Easy Booking. All rights reserved.</p>
+  </div>
+</footer>
+
+<script src="/analytics.js"></script>
+<script src="/nav-auth.js"></script>
+</body>
+</html>

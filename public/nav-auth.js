@@ -38,15 +38,24 @@
     .then((response) => (response.ok ? response.json() : null))
     .then((data) => {
       const authenticated = Boolean(data && data.authenticated);
+      const isAdmin = Boolean(data && data.user && data.user.role === 'admin');
 
       navs.forEach((nav) => {
         const login = nav.querySelector('a[href="/login"]');
         const register = nav.querySelector('a[href="/register"]');
+        const analytics = nav.querySelector('a[href="/analytics"]');
         const logoutForm = nav.querySelector('.nav-logout-form');
 
         if (authenticated) {
           if (login) login.remove();
           if (register) register.remove();
+          if (isAdmin) {
+            if (!analytics) {
+              nav.appendChild(createLink('/analytics', 'Analytics'));
+            }
+          } else if (analytics) {
+            analytics.remove();
+          }
           if (!logoutForm) {
             nav.appendChild(createLogoutForm());
           }
@@ -54,6 +63,7 @@
         }
 
         if (logoutForm) logoutForm.remove();
+        if (analytics) analytics.remove();
         if (!login) nav.appendChild(createLink('/login', 'Login'));
         if (!register) nav.appendChild(createLink('/register', 'Register'));
       });

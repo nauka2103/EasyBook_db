@@ -1,88 +1,225 @@
-﻿# EasyBooking Final Project (Week 10)
+# EasyBooking Endterm Project
 
-Production-ready web application built on the same Assignment 4 project.
+Web application for hotel discovery and booking management built for **Advanced Databases (NoSQL)**.
 
-## Tech Stack
+## 1. Project Overview
+
+EasyBooking provides:
+- hotel catalog with filtering/sorting/pagination
+- user registration/login with session-based authentication
+- role-based authorization (`user`, `admin`)
+- booking CRUD with ownership rules
+- booking analytics for admins
+- REST API + server-rendered frontend
+
+This project uses MongoDB as the primary database and demonstrates CRUD, advanced updates/deletes, aggregation pipelines, indexing, and secure backend logic.
+
+## 2. System Architecture
+
+### Stack
 - Node.js + Express
 - MongoDB Native Driver
-- express-session + connect-mongo
-- bcrypt
+- `express-session` + `connect-mongo`
+- `bcrypt` for password hashing
 
-## Final Project Requirements Coverage
-- Modular backend structure:
-  - `src/config`
-  - `src/middlewares`
-  - `src/models`
-  - `src/controllers`
-  - `src/routes`
-  - `src/services`
-- Two+ related collections:
-  - `users`
-  - `hotels`
-  - `bookings` (references `userId` + `hotelId`)
-  - `contact_requests`
-- Authentication:
-  - login / logout / register
-  - sessions-based auth
-  - bcrypt password hashing
-- Authorization + roles:
-  - roles: `user`, `admin`
-  - admin can manage hotels and all bookings
-  - user can manage only own bookings
-- API security:
-  - write endpoints protected
-  - no public update/delete endpoints
-  - validation + safe error handling
-- Pagination:
-  - hotels and bookings list endpoints support pagination metadata
-- Environment-based secrets:
-  - no hardcoded secrets required for startup
+### Layered structure
+- `src/config` - environment/session config
+- `src/models` - MongoDB data access and aggregation
+- `src/controllers` - request handling and business logic
+- `src/routes` - web and REST routing
+- `src/middlewares` - auth, async, error handling
+- `src/services` - startup maintenance (indexes)
+- `views` - HTML pages
+- `public` - static JS/CSS
 
-## Environment Variables (`.env`)
-```env
-PORT=3000
-MONGO_URI=your_mongo_connection_string
-DB_NAME=easybook_final
-DNS_SERVERS=8.8.8.8,1.1.1.1
-SESSION_SECRET=your_long_random_secret
+### Data flow
+1. Client sends request to web route (`/`) or API route (`/api/*`).
+2. Middleware attaches current user from session.
+3. Controller validates payload, applies business rules.
+4. Model executes MongoDB operations.
+5. Controller returns HTML or JSON.
 
-# Optional seed users (email-based)
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=admin12345
-DEMO_EMAIL=demo@example.com
-DEMO_PASSWORD=demo12345
-```
+## 3. Database Schema
 
-## Run
-```bash
-npm install
-npm start
-```
+### `users`
+- `_id: ObjectId`
+- `email: string` (unique)
+- `passwordHash: string`
+- `role: "user" | "admin"`
+- `createdAt: Date`
+- `updatedAt: Date`
 
-## Main Web Routes
-- `GET /hotels` (public)
-- `GET /hotels/:id` (public)
-- `GET /bookings` (auth required)
-- `GET /login`, `POST /login`
-- `GET /register`, `POST /register`
-- `GET /contact`, `POST /contact`
-- `POST /logout`
+### `hotels`
+- `_id: ObjectId`
+- `title, description, location, address: string`
+- `price_per_night: number`
+- `available_rooms: number`
+- `amenities: string[]`
+- `imageUrl: string`
+- `rating: number`
+- `ratingVotes: number`
+- `ratingTotal: number`
+- `recentRatings: [embedded documents]`
+  - `_id: ObjectId`
+  - `score: number`
+  - `userId: ObjectId | null` (reference to `users`)
+  - `createdAt: Date`
+- `createdBy: ObjectId | null` (reference to `users`)
+- `createdAt, updatedAt: Date`
 
-## Main API Routes
-- `GET /api/auth/session`
+### `bookings`
+- `_id: ObjectId`
+- `hotelId: ObjectId` (reference to `hotels`)
+- `userId: ObjectId` (reference to `users`)
+- `checkIn, checkOut: "YYYY-MM-DD"`
+- `guests: number`
+- `status: "confirmed" | "cancelled"`
+- `notes: string`
+- `statusHistory: [embedded documents]`
+  - `_id: ObjectId`
+  - `status: string`
+  - `reason: string`
+  - `changedAt: Date`
+  - `changedBy: ObjectId | null` (reference to `users`)
+  - `comment: string` (optional)
+  - `annotatedAt: Date` (optional)
+  - `annotatedBy: ObjectId | null` (optional)
+- `createdAt, updatedAt: Date`
+
+### `contact_requests`
+- `_id: ObjectId`
+- `name, phone, city, email, message: string`
+- `status: "new"`
+- `createdAt, updatedAt: Date`
+
+## 4. MongoDB Queries and Operators
+
+The project uses required operators and patterns:
+
+- `$set`: standard update fields in hotel/booking/user updates.
+- `$inc`: hotel rating counters (`ratingVotes`, `ratingTotal`).
+- `$push`: append booking status history and recent rating events.
+- `$pull`: remove booking status history entries and remove amenities.
+- positional `$`: update one embedded history entry (`statusHistory.$.comment`).
+- `$lookup`, `$unwind`, `$facet`, `$group`, `$addFields`, `$project`: aggregation endpoints.
+
+## 5. REST API Documentation
+
+### Auth
+- `GET /api/auth/session` - current session status.
+
+### Hotels
 - `GET /api/hotels`
 - `GET /api/hotels/:id`
 - `POST /api/hotels` (admin)
 - `PUT /api/hotels/:id` (admin)
 - `DELETE /api/hotels/:id` (admin)
 - `POST /api/hotels/:id/rate` (auth)
-- `GET /api/bookings` (auth)
-- `GET /api/bookings/:id` (owner or admin)
-- `POST /api/bookings` (auth)
-- `PUT /api/bookings/:id` (owner or admin)
-- `DELETE /api/bookings/:id` (owner or admin)
+- `PATCH /api/hotels/:id/amenities` (admin, advanced update/delete)
 
-- npm.cmd run role -- list
-- npm.cmd run role -- show <username>
-- npm.cmd run role -- grant <username>
-- npm.cmd run role -- revoke <username>
+### Bookings
+- `GET /api/bookings` (auth)
+- `GET /api/bookings/:id` (auth, owner/admin)
+- `POST /api/bookings` (auth)
+- `PUT /api/bookings/:id` (auth, owner/admin)
+- `DELETE /api/bookings/:id` (auth, owner/admin)
+- `PATCH /api/bookings/:id/status` (auth, owner/admin)
+- `PATCH /api/bookings/:id/status-history/:entryId` (auth, owner/admin, positional update)
+- `DELETE /api/bookings/:id/status-history/:entryId` (admin, `$pull`)
+
+### Analytics
+- `GET /api/analytics/overview` (admin)
+
+### API versioning
+- Alias enabled at `/api/v1/*` for all routes.
+
+## 6. Aggregation Endpoint (Business Meaning)
+
+`GET /api/analytics/overview?months=6` computes:
+- total / confirmed / cancelled bookings
+- estimated revenue from confirmed bookings
+- monthly booking and revenue trend
+- top hotels by confirmed bookings and revenue
+- city-level booking and revenue summary
+
+The pipeline joins bookings with hotels and estimates booking amount using:
+- nights between check-in/check-out
+- hotel `price_per_night`
+- booking status
+
+## 7. Indexing and Optimization Strategy
+
+Indexes are created at startup (`src/services/seedService.js`):
+
+- `users`: `{ email: 1 }` unique
+- `hotels`: `{ location: 1 }`
+- `hotels`: `{ price_per_night: 1 }`
+- `hotels`: `{ location: 1, price_per_night: 1, rating: -1 }` (compound)
+- `hotels`: `{ createdAt: -1 }`
+- `bookings`: `{ userId: 1, createdAt: -1 }`
+- `bookings`: `{ userId: 1, status: 1, createdAt: -1 }` (compound)
+- `bookings`: `{ hotelId: 1, createdAt: -1 }`
+- `bookings`: `{ hotelId: 1, status: 1, createdAt: -1 }` (compound)
+- `bookings`: `{ createdAt: -1, status: 1 }` (compound)
+- `contact_requests`: `{ createdAt: -1 }`
+
+These indexes target:
+- frequent filters (`location`, `status`, ownership)
+- sorted listings (`createdAt`)
+- analytics and dashboard scans within recent months
+
+## 8. Frontend Pages
+
+Main pages include:
+- `/` home
+- `/hotels` hotels list
+- `/hotels/:id` hotel details
+- `/bookings` bookings list
+- `/bookings/new` create booking
+- `/bookings/:id` booking details
+- `/analytics` admin analytics page (fetches real API data)
+- `/login`, `/register`, `/about`, `/contact`, `/terms`, `/privacy`
+
+This exceeds the minimum page requirement for a single student project.
+
+## 9. Security and Authorization
+
+- Password hashing with bcrypt.
+- Session storage in MongoDB (`connect-mongo`).
+- Auth middleware for protected routes.
+- Role-based authorization (`admin` routes and analytics).
+- Owner-or-admin checks for booking access.
+- Input validation and safe redirect handling.
+- Centralized error and 404 handlers.
+- Environment-based configuration (`.env`).
+
+## 10. Run Instructions
+
+```bash
+npm install
+npm start
+```
+
+Required `.env` variables:
+
+```env
+PORT=3000
+MONGO_URI=...
+DB_NAME=easybook_final
+SESSION_SECRET=very_long_random_secret
+DNS_SERVERS=8.8.8.8,1.1.1.1
+```
+
+## 11. Additional Engineering Artifacts
+
+- `REPORT.md` - structured project report for defense.
+- `openapi.yaml` - OpenAPI 3.0 specification (core API paths).
+- API pagination/filter/sort support on listing endpoints.
+
+## 12. Contribution
+
+Single-student implementation:
+- backend architecture and MongoDB modeling
+- REST API design and security
+- frontend pages and API integration
+- documentation, OpenAPI, and deployment-ready config

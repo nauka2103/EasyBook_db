@@ -29,6 +29,7 @@ const createApp = () => {
 
   app.use('/', webRouter);
   app.use('/api', apiRouter);
+  app.use('/api/v1', apiRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
