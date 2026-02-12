@@ -1,4 +1,4 @@
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const { getDb } = require('../../database/db');
 
 const USER_COLLECTION = 'users';

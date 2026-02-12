@@ -3,7 +3,22 @@ const { getDb } = require('../../database/db');
 const dropLegacyUsernameIndexes = async () => {
   const db = getDb();
   const usersCollection = db.collection('users');
-  const userIndexes = await usersCollection.indexes();
+  let userIndexes = [];
+
+  try {
+    userIndexes = await usersCollection.indexes();
+  } catch (error) {
+    const namespaceMissing = Boolean(
+      error
+      && (error.codeName === 'NamespaceNotFound' || /ns does not exist/i.test(String(error.message || '')))
+    );
+
+    if (namespaceMissing) {
+      return;
+    }
+
+    throw error;
+  }
 
   const legacyIndexNames = userIndexes
     .filter((index) =>
@@ -38,7 +53,11 @@ const ensureIndexes = async () => {
     db.collection('bookings').createIndex({ userId: 1, status: 1, createdAt: -1 }),
     db.collection('bookings').createIndex({ hotelId: 1, createdAt: -1 }),
     db.collection('bookings').createIndex({ hotelId: 1, status: 1, createdAt: -1 }),
-    db.collection('bookings').createIndex({ createdAt: -1, status: 1 })
+    db.collection('bookings').createIndex({ createdAt: -1, status: 1 }),
+    db.collection('hotel_presence').createIndex({ hotelId: 1, slot: 1 }, { unique: true }),
+    db.collection('hotel_presence').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    db.collection('hotel_presence').createIndex({ hotelId: 1, token: 1 }),
+    db.collection('hotel_presence').createIndex({ hotelId: 1, expiresAt: 1 })
   ]);
 };
 

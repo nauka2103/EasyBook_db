@@ -346,7 +346,10 @@ const renderHotelDetailsPage = async (req, res) => {
     ratingNotice: safeHtml(ratingNotice),
     ratingActions: safeHtml(ratingActions),
     bookButton: safeHtml(bookButton),
-    manageButtons: safeHtml(manageButtons)
+    manageButtons: safeHtml(manageButtons),
+    presenceEnabled: env.presenceEnabled ? 'true' : 'false',
+    presenceHeartbeatSeconds: String(env.presenceHeartbeatSeconds),
+    presenceWaitUrl: `/hotel-wait?hotelId=${hotel._id.toString()}`
   }));
 };
 

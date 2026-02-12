@@ -20,7 +20,8 @@ This project uses MongoDB as the primary database and demonstrates CRUD, advance
 - Node.js + Express
 - MongoDB Native Driver
 - `express-session` + `connect-mongo`
-- `bcrypt` for password hashing
+- `bcryptjs` for password hashing
+- `swagger-ui-express` + OpenAPI (API docs UI)
 
 ### Layered structure
 - `src/config` - environment/session config
@@ -92,6 +93,15 @@ This project uses MongoDB as the primary database and demonstrates CRUD, advance
 - `status: "new"`
 - `createdAt, updatedAt: Date`
 
+### `hotel_presence`
+- `_id: ObjectId`
+- `hotelId: ObjectId` (reference to `hotels`)
+- `slot: number` (range `1..PRESENCE_CAPACITY`)
+- `token: string` (UUID from HttpOnly cookie)
+- `userId: ObjectId | null`
+- `expiresAt: Date` (presence TTL)
+- `createdAt, updatedAt: Date`
+
 ## 4. MongoDB Queries and Operators
 
 The project uses required operators and patterns:
@@ -102,6 +112,7 @@ The project uses required operators and patterns:
 - `$pull`: remove booking status history entries and remove amenities.
 - positional `$`: update one embedded history entry (`statusHistory.$.comment`).
 - `$lookup`, `$unwind`, `$facet`, `$group`, `$addFields`, `$project`: aggregation endpoints.
+- MongoDB ACID transactions (`startSession` + `withTransaction`) for booking consistency and room inventory updates.
 
 ## 5. REST API Documentation
 
@@ -130,8 +141,16 @@ The project uses required operators and patterns:
 ### Analytics
 - `GET /api/analytics/overview` (admin)
 
+### Presence / Queue
+- `GET /api/hotels/:hotelId/presence/status`
+- `POST /api/hotels/:hotelId/presence/heartbeat`
+
 ### API versioning
 - Alias enabled at `/api/v1/*` for all routes.
+
+### Swagger UI
+- Interactive API docs: `GET /api/docs`
+- Raw OpenAPI spec: `GET /api/docs/openapi.yaml`
 
 ## 6. Aggregation Endpoint (Business Meaning)
 
@@ -162,6 +181,10 @@ Indexes are created at startup (`src/services/seedService.js`):
 - `bookings`: `{ hotelId: 1, status: 1, createdAt: -1 }` (compound)
 - `bookings`: `{ createdAt: -1, status: 1 }` (compound)
 - `contact_requests`: `{ createdAt: -1 }`
+- `hotel_presence`: `{ hotelId: 1, slot: 1 }` unique
+- `hotel_presence`: `{ expiresAt: 1 }` TTL
+- `hotel_presence`: `{ hotelId: 1, token: 1 }`
+- `hotel_presence`: `{ hotelId: 1, expiresAt: 1 }`
 
 These indexes target:
 - frequent filters (`location`, `status`, ownership)
@@ -174,6 +197,7 @@ Main pages include:
 - `/` home
 - `/hotels` hotels list
 - `/hotels/:id` hotel details
+- `/hotel-wait` waiting page for presence queue
 - `/bookings` bookings list
 - `/bookings/new` create booking
 - `/bookings/:id` booking details
@@ -184,7 +208,7 @@ This exceeds the minimum page requirement for a single student project.
 
 ## 9. Security and Authorization
 
-- Password hashing with bcrypt.
+- Password hashing with bcryptjs.
 - Session storage in MongoDB (`connect-mongo`).
 - Auth middleware for protected routes.
 - Role-based authorization (`admin` routes and analytics).
@@ -192,6 +216,7 @@ This exceeds the minimum page requirement for a single student project.
 - Input validation and safe redirect handling.
 - Centralized error and 404 handlers.
 - Environment-based configuration (`.env`).
+- Rate limiting for presence polling/heartbeat endpoints.
 
 ## 10. Run Instructions
 
@@ -208,13 +233,19 @@ MONGO_URI=...
 DB_NAME=easybook_final
 SESSION_SECRET=very_long_random_secret
 DNS_SERVERS=8.8.8.8,1.1.1.1
+PRESENCE_ENABLED=true
+PRESENCE_CAPACITY=1
+PRESENCE_TTL_SECONDS=60
+PRESENCE_HEARTBEAT_SECONDS=15
 ```
 
 ## 11. Additional Engineering Artifacts
 
 - `REPORT.md` - structured project report for defense.
-- `openapi.yaml` - OpenAPI 3.0 specification (core API paths).
+- `openapi.yaml` - OpenAPI 3.0 specification (core API paths), rendered via Swagger UI.
 - API pagination/filter/sort support on listing endpoints.
+- ACID transactions for booking create/update/delete operations with inventory safety.
+- Hotel page presence queue with DB-backed TTL slots and waiting page auto-admission.
 
 ## 12. Contribution
 

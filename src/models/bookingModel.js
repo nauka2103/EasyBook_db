@@ -1,10 +1,23 @@
 ﻿const { ObjectId } = require('mongodb');
-const { getDb } = require('../../database/db');
+const { getDb, getClient } = require('../../database/db');
 
 const BOOKING_COLLECTION = 'bookings';
 const ALLOWED_BOOKING_STATUSES = ['confirmed', 'cancelled'];
 
 const getBookingsCollection = () => getDb().collection(BOOKING_COLLECTION);
+const getHotelsCollection = () => getDb().collection('hotels');
+
+const TRANSACTION_OPTIONS = {
+  readPreference: 'primary',
+  readConcern: { level: 'snapshot' },
+  writeConcern: { w: 'majority' }
+};
+
+const createModelError = (code, message) => {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+};
 
 const normalizeReason = (value, maxLength = 300) => String(value || '').trim().slice(0, maxLength);
 
@@ -19,6 +32,55 @@ const buildStatusHistoryEntry = ({ status, reason = '', changedBy = null }) => (
   changedAt: new Date(),
   changedBy: toObjectIdOrNull(changedBy)
 });
+
+const ensureHotelExists = async ({ session, hotelId }) => {
+  const hotel = await getHotelsCollection().findOne(
+    { _id: hotelId },
+    { session, projection: { _id: 1 } }
+  );
+
+  if (!hotel) {
+    throw createModelError('HOTEL_NOT_FOUND', 'Selected hotel does not exist');
+  }
+};
+
+const reserveHotelRoom = async ({ session, hotelId }) => {
+  const result = await getHotelsCollection().updateOne(
+    {
+      _id: hotelId,
+      available_rooms: { $gt: 0 }
+    },
+    {
+      $inc: { available_rooms: -1 },
+      $set: { updatedAt: new Date() }
+    },
+    { session }
+  );
+
+  if (result.matchedCount === 0) {
+    const hotel = await getHotelsCollection().findOne(
+      { _id: hotelId },
+      { session, projection: { _id: 1 } }
+    );
+
+    if (!hotel) {
+      throw createModelError('HOTEL_NOT_FOUND', 'Selected hotel does not exist');
+    }
+
+    throw createModelError('NO_ROOMS', 'No available rooms for selected hotel');
+  }
+};
+
+const releaseHotelRoom = async ({ session, hotelId }) => {
+  await getHotelsCollection().updateOne(
+    { _id: hotelId },
+    {
+      $inc: { available_rooms: 1 },
+      $set: { updatedAt: new Date() }
+    },
+    { session }
+  );
+};
 
 const buildBookingFilterFromQuery = ({ query = {}, currentUser = null, includeAll = false }) => {
   const filter = {};
@@ -157,36 +219,120 @@ const createBooking = async ({ booking, userId }) => {
     })
   ];
 
-  const result = await getBookingsCollection().insertOne({
-    ...booking,
-    status: resolvedStatus,
-    statusHistory,
-    userId: new ObjectId(userId),
-    createdAt: now,
-    updatedAt: now
-  });
+  const session = getClient().startSession();
+  let insertedId = null;
 
-  return result.insertedId;
+  try {
+    await session.withTransaction(async () => {
+      await ensureHotelExists({
+        session,
+        hotelId: booking.hotelId
+      });
+
+      if (resolvedStatus === 'confirmed') {
+        await reserveHotelRoom({
+          session,
+          hotelId: booking.hotelId
+        });
+      }
+
+      const result = await getBookingsCollection().insertOne({
+        ...booking,
+        status: resolvedStatus,
+        statusHistory,
+        userId: new ObjectId(userId),
+        createdAt: now,
+        updatedAt: now
+      }, { session });
+
+      insertedId = result.insertedId;
+    }, TRANSACTION_OPTIONS);
+  } finally {
+    await session.endSession();
+  }
+
+  return insertedId;
 };
 
 const updateBookingById = async (id, booking, { historyEntry = null } = {}) => {
   if (!ObjectId.isValid(id)) return { matchedCount: 0 };
+  const bookingId = new ObjectId(id);
+  const session = getClient().startSession();
+  let matchedCount = 0;
 
-  const update = {
-    $set: {
-      ...booking,
-      updatedAt: new Date()
-    }
-  };
+  try {
+    await session.withTransaction(async () => {
+      const existing = await getBookingsCollection().findOne(
+        { _id: bookingId },
+        {
+          session,
+          projection: {
+            hotelId: 1,
+            status: 1
+          }
+        }
+      );
 
-  if (historyEntry) {
-    update.$push = { statusHistory: historyEntry };
+      if (!existing) {
+        matchedCount = 0;
+        return;
+      }
+
+      matchedCount = 1;
+
+      const nextHotelId = booking.hotelId || existing.hotelId;
+      const nextStatus = ALLOWED_BOOKING_STATUSES.includes(String(booking.status))
+        ? String(booking.status)
+        : String(existing.status || 'confirmed');
+
+      const currentHotelId = existing.hotelId;
+      const currentStatus = String(existing.status || 'confirmed');
+      const hotelChanged = String(currentHotelId) !== String(nextHotelId);
+      const statusChanged = currentStatus !== nextStatus;
+
+      if (hotelChanged) {
+        await ensureHotelExists({ session, hotelId: nextHotelId });
+      }
+
+      if (hotelChanged || statusChanged) {
+        if (currentStatus === 'confirmed') {
+          await releaseHotelRoom({
+            session,
+            hotelId: currentHotelId
+          });
+        }
+
+        if (nextStatus === 'confirmed') {
+          await reserveHotelRoom({
+            session,
+            hotelId: nextHotelId
+          });
+        }
+      }
+
+      const update = {
+        $set: {
+          ...booking,
+          status: nextStatus,
+          updatedAt: new Date()
+        }
+      };
+
+      if (historyEntry) {
+        update.$push = { statusHistory: historyEntry };
+      }
+
+      await getBookingsCollection().updateOne(
+        { _id: bookingId },
+        update,
+        { session }
+      );
+    }, TRANSACTION_OPTIONS);
+  } finally {
+    await session.endSession();
   }
 
-  return getBookingsCollection().updateOne(
-    { _id: new ObjectId(id) },
-    update
-  );
+  return { matchedCount };
 };
 
 const updateBookingStatusById = async (id, { status, reason = '', changedBy = null }) => {
@@ -250,7 +396,47 @@ const removeBookingStatusHistoryById = async ({ id, entryId }) => {
 
 const deleteBookingById = async (id) => {
   if (!ObjectId.isValid(id)) return { deletedCount: 0 };
-  return getBookingsCollection().deleteOne({ _id: new ObjectId(id) });
+  const bookingId = new ObjectId(id);
+  const session = getClient().startSession();
+  let deletedCount = 0;
+
+  try {
+    await session.withTransaction(async () => {
+      const existing = await getBookingsCollection().findOne(
+        { _id: bookingId },
+        {
+          session,
+          projection: {
+            hotelId: 1,
+            status: 1
+          }
+        }
+      );
+
+      if (!existing) {
+        deletedCount = 0;
+        return;
+      }
+
+      if (String(existing.status || 'confirmed') === 'confirmed') {
+        await releaseHotelRoom({
+          session,
+          hotelId: existing.hotelId
+        });
+      }
+
+      const result = await getBookingsCollection().deleteOne(
+        { _id: bookingId },
+        { session }
+      );
+
+      deletedCount = result.deletedCount;
+    }, TRANSACTION_OPTIONS);
+  } finally {
+    await session.endSession();
+  }
+
+  return { deletedCount };
 };
 
 module.exports = {

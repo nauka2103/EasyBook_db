@@ -6,7 +6,7 @@
   <title>Hotel Details - Easy Booking</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
-<body>
+<body data-hotel-id="{{id}}" data-presence-enabled="{{presenceEnabled}}" data-presence-heartbeat-seconds="{{presenceHeartbeatSeconds}}" data-presence-wait-url="{{presenceWaitUrl}}">
 
   <header class="header">
     <div class="container">
@@ -78,6 +78,7 @@
   </footer>
 
   <script src="/guest-booking.js"></script>
+  <script src="/hotel-presence.js"></script>
 
 <script src='/nav-auth.js'></script>
 </body>

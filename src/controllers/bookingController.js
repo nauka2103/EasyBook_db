@@ -50,6 +50,21 @@ const formatDateTime = (value) => {
   });
 };
 
+const isBookingWriteError = (error) => (
+  error
+  && ['NO_ROOMS', 'HOTEL_NOT_FOUND'].includes(error.code)
+);
+
+const getBookingWriteErrorMessage = (error) => (
+  error.code === 'NO_ROOMS'
+    ? 'No available rooms for selected hotel'
+    : 'Selected hotel does not exist'
+);
+
+const getBookingWriteErrorStatus = (error) => (
+  error.code === 'NO_ROOMS' ? 409 : 400
+);
+
 const getHotelOptionsHtml = async (selectedHotelId = '') => {
   const { items: hotels } = await findHotels({
     filter: {},
@@ -209,10 +224,30 @@ const createBookingFromPage = async (req, res) => {
     }));
   }
 
-  const insertedId = await createBooking({
-    booking,
-    userId: req.currentUser.id
-  });
+  let insertedId;
+
+  try {
+    insertedId = await createBooking({
+      booking,
+      userId: req.currentUser.id
+    });
+  } catch (error) {
+    if (isBookingWriteError(error)) {
+      return res.status(getBookingWriteErrorStatus(error)).send(renderView('bookings-new.html', {
+        authControls: safeHtml(renderAuthControls(req, '/bookings/new')),
+        errorMessage: getBookingWriteErrorMessage(error),
+        hotelOptions: safeHtml(hotelOptions),
+        checkIn: req.body.checkIn || '',
+        checkOut: req.body.checkOut || '',
+        guests: req.body.guests || '1',
+        statusConfirmedSelected: String(req.body.status || 'confirmed') === 'confirmed' ? 'selected' : '',
+        statusCancelledSelected: String(req.body.status || '') === 'cancelled' ? 'selected' : '',
+        notes: req.body.notes || ''
+      }));
+    }
+
+    throw error;
+  }
 
   return res.redirect(`/bookings/${insertedId}`);
 };
@@ -353,19 +388,39 @@ const updateBookingFromPage = async (req, res) => {
   }
 
   const statusChanged = Boolean(booking.status) && booking.status !== existing.status;
-  await updateBookingById(
-    req.params.id,
-    booking,
-    {
-      historyEntry: statusChanged
-        ? buildStatusHistoryEntry(
-          booking.status,
-          `Status updated by ${req.currentUser.email || 'user'} from booking edit page`,
-          req.currentUser.id
-        )
-        : null
+  try {
+    await updateBookingById(
+      req.params.id,
+      booking,
+      {
+        historyEntry: statusChanged
+          ? buildStatusHistoryEntry(
+            booking.status,
+            `Status updated by ${req.currentUser.email || 'user'} from booking edit page`,
+            req.currentUser.id
+          )
+          : null
+      }
+    );
+  } catch (error) {
+    if (isBookingWriteError(error)) {
+      return res.status(getBookingWriteErrorStatus(error)).send(renderView('bookings-edit.html', {
+        authControls: safeHtml(renderAuthControls(req, `/bookings/${req.params.id}/edit`)),
+        id: req.params.id,
+        errorMessage: getBookingWriteErrorMessage(error),
+        hotelOptions: safeHtml(hotelOptions),
+        checkIn: req.body.checkIn || '',
+        checkOut: req.body.checkOut || '',
+        guests: req.body.guests || '1',
+        statusConfirmedSelected: String(req.body.status || 'confirmed') === 'confirmed' ? 'selected' : '',
+        statusCancelledSelected: String(req.body.status || '') === 'cancelled' ? 'selected' : '',
+        notes: req.body.notes || ''
+      }));
     }
-  );
+
+    throw error;
+  }
+
   return res.redirect(`/bookings/${req.params.id}`);
 };
 
@@ -442,7 +497,16 @@ const createBookingApi = async (req, res) => {
     return res.status(400).json({ error: 'Selected hotel does not exist' });
   }
 
-  const insertedId = await createBooking({ booking, userId: req.currentUser.id });
+  let insertedId;
+  try {
+    insertedId = await createBooking({ booking, userId: req.currentUser.id });
+  } catch (error) {
+    if (isBookingWriteError(error)) {
+      return res.status(getBookingWriteErrorStatus(error)).json({ error: getBookingWriteErrorMessage(error) });
+    }
+    throw error;
+  }
+
   return res.status(201).json({ _id: insertedId });
 };
 
@@ -473,19 +537,27 @@ const updateBookingApi = async (req, res) => {
   }
 
   const statusChanged = Boolean(booking.status) && booking.status !== existing.status;
-  await updateBookingById(
-    req.params.id,
-    booking,
-    {
-      historyEntry: statusChanged
-        ? buildStatusHistoryEntry(
-          booking.status,
-          `Status updated by ${req.currentUser.email || 'user'} via API`,
-          req.currentUser.id
-        )
-        : null
+  try {
+    await updateBookingById(
+      req.params.id,
+      booking,
+      {
+        historyEntry: statusChanged
+          ? buildStatusHistoryEntry(
+            booking.status,
+            `Status updated by ${req.currentUser.email || 'user'} via API`,
+            req.currentUser.id
+          )
+          : null
+      }
+    );
+  } catch (error) {
+    if (isBookingWriteError(error)) {
+      return res.status(getBookingWriteErrorStatus(error)).json({ error: getBookingWriteErrorMessage(error) });
     }
-  );
+    throw error;
+  }
+
   return res.status(200).json({ message: 'Updated' });
 };
 
@@ -535,11 +607,20 @@ const patchBookingStatusApi = async (req, res) => {
     `Status updated by ${req.currentUser.email || 'user'}`
   );
 
-  const result = await updateBookingStatusById(req.params.id, {
-    status: nextStatus,
-    reason,
-    changedBy: req.currentUser.id
-  });
+  let result;
+
+  try {
+    result = await updateBookingStatusById(req.params.id, {
+      status: nextStatus,
+      reason,
+      changedBy: req.currentUser.id
+    });
+  } catch (error) {
+    if (isBookingWriteError(error)) {
+      return res.status(getBookingWriteErrorStatus(error)).json({ error: getBookingWriteErrorMessage(error) });
+    }
+    throw error;
+  }
 
   if (!result.matchedCount) {
     return res.status(404).json({ error: 'Not found' });

@@ -1,4 +1,4 @@
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const { findUserByEmail, createUser } = require('../models/userModel');
 const { renderView } = require('../utils/view');
 const { toTrimmedString, validateRegisterPayload } = require('../utils/validation');

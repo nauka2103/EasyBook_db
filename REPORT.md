@@ -26,6 +26,7 @@ Collections:
 - `hotels`
 - `bookings`
 - `contact_requests`
+- `hotel_presence` (queue slots per hotel page)
 
 Referenced model:
 - `bookings.userId -> users._id`
@@ -35,6 +36,12 @@ Referenced model:
 Embedded model:
 - `bookings.statusHistory[]` (status audit entries)
 - `hotels.recentRatings[]` (rating events)
+
+Presence model:
+- `hotel_presence.hotelId` references hotel
+- `slot` is unique per hotel (`(hotelId, slot)` unique index)
+- `token` is visitor UUID from HttpOnly cookie
+- `expiresAt` controls automatic slot expiration (TTL index)
 
 ## 4. CRUD and Business Logic
 
@@ -49,6 +56,7 @@ Business rules:
 - admin can manage all bookings and hotels
 - hotel rating updates counters and keeps recent embedded events
 - booking status changes append audit history entries
+- hotel page entry is capacity-limited and uses waiting room when all slots are busy
 
 ## 5. MongoDB Advanced Operations
 
@@ -58,6 +66,8 @@ Used operators:
 - `$push` for history/rating event appends
 - `$pull` for removing embedded entries
 - positional `$` for targeted embedded history note updates
+- ACID transactions (`startSession` + `withTransaction`) for booking writes that also modify hotel room inventory
+- TTL index and `expiresAt > now` checks for durable presence slot lifecycle
 
 ## 6. Aggregation Pipelines
 
@@ -77,9 +87,12 @@ Main REST endpoints:
 - `/api/hotels/*`
 - `/api/bookings/*`
 - `/api/analytics/overview`
+- `/api/hotels/:hotelId/presence/status`
+- `/api/hotels/:hotelId/presence/heartbeat`
 - `/api/v1/*` (versioning alias)
 
 Detailed request/response examples are available in `openapi.yaml`.
+Interactive docs are available via Swagger UI at `/api/docs`.
 
 ## 8. Indexing and Optimization
 
@@ -88,6 +101,7 @@ Indexes include:
 - hotel filter/sort indexes
 - booking ownership/status compound indexes
 - createdAt indexes for list and analytics access
+- presence indexes (`(hotelId,slot)` unique + TTL by `expiresAt`)
 
 Goal: reduce scan volume for common queries and improve list/analytics latency.
 
@@ -95,6 +109,7 @@ Goal: reduce scan volume for common queries and improve list/analytics latency.
 
 Frontend supports:
 - hotel browse/view/create/edit/delete
+- waiting room page (`/hotel-wait`) with auto-polling and auto-enter
 - booking create/view/edit/delete
 - auth flows (register/login/logout)
 - admin analytics page using real API `fetch` integration
@@ -103,12 +118,13 @@ Minimum page requirement is exceeded.
 
 ## 10. Security Measures
 
-- bcrypt password hashing
+- bcryptjs password hashing
 - authenticated sessions in MongoDB store
 - role-based route guards
 - owner-level access control
 - centralized error handling and safe redirects
 - environment variables for runtime secrets
+- presence token in HttpOnly cookie + rate-limited polling/heartbeat endpoints
 
 ## 11. Contribution
 

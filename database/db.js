@@ -37,4 +37,15 @@ function getDb() {
   return db;
 }
 
-module.exports = { connectToDb, getDb };
+function getClient() {
+  if (!client) {
+    throw new Error('MongoDB client is not initialized. Call connectToDb first.');
+  }
+  return client;
+}
+
+module.exports = {
+  connectToDb,
+  getDb,
+  getClient
+};

@@ -140,6 +140,44 @@ paths:
         '200':
           description: Amenities updated
 
+  /api/hotels/{hotelId}/presence/status:
+    get:
+      summary: Presence queue status for hotel page
+      description: Returns current active slots, queue capacity, and whether current visitor can enter.
+      parameters:
+        - $ref: '#/components/parameters/HotelIdPath'
+      responses:
+        '200':
+          description: Presence status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresenceStatus'
+        '400':
+          description: Invalid hotel ID
+        '429':
+          description: Too many requests
+
+  /api/hotels/{hotelId}/presence/heartbeat:
+    post:
+      summary: Refresh current visitor presence slot
+      description: Extends slot TTL for the visitor identified by HttpOnly `presence_token` cookie.
+      parameters:
+        - $ref: '#/components/parameters/HotelIdPath'
+      responses:
+        '200':
+          description: Heartbeat result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresenceHeartbeat'
+        '400':
+          description: Invalid hotel ID
+        '401':
+          description: Presence cookie missing
+        '429':
+          description: Too many requests
+
   /api/bookings:
     get:
       summary: List bookings (auth)
@@ -320,6 +358,13 @@ components:
       schema:
         type: string
       description: Embedded history ObjectId
+    HotelIdPath:
+      in: path
+      name: hotelId
+      required: true
+      schema:
+        type: string
+      description: MongoDB ObjectId
   schemas:
     UserSession:
       type: object
@@ -383,3 +428,16 @@ components:
         guests: { type: integer, minimum: 1, maximum: 10 }
         status: { type: string, enum: [confirmed, cancelled] }
         notes: { type: string }
+    PresenceStatus:
+      type: object
+      properties:
+        active: { type: integer, minimum: 0 }
+        capacity: { type: integer, minimum: 1 }
+        canEnter: { type: boolean }
+      required: [active, capacity, canEnter]
+    PresenceHeartbeat:
+      type: object
+      properties:
+        ok: { type: boolean }
+        reason: { type: string, example: no_slot }
+        expiresAt: { type: string, format: date-time }

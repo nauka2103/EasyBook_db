@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Please Wait - Easy Booking</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body data-hotel-id="{{hotelId}}" data-poll-seconds="{{pollSeconds}}">
+
+<header class="header">
+  <div class="container">
+    <div class="logo">Easy<span>Booking</span></div>
+    <nav class="nav">
+      <a href="/">Home</a>
+      <a href="/hotels">Hotels</a>
+      <a href="/bookings">Bookings</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="/login">Login</a>
+      <a href="/register">Register</a>
+    </nav>
+  </div>
+</header>
+
+<section class="features">
+  <div class="container">
+    <div class="form-card" style="max-width: 760px; text-align: center;">
+      <h2>Hotel Is Busy</h2>
+      <p style="margin-top: 12px;">
+        Отель сейчас занят. Вы будете автоматически допущены при освобождении слота.
+      </p>
+      <p id="presenceStatusText" style="margin-top: 16px; color: #c7d2fe;">
+        Checking availability...
+      </p>
+      <div style="margin-top: 20px;">
+        <a href="/hotels" class="btn btn-outline">Back to hotels</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <p>Copyright 2026 Easy Booking. All rights reserved.</p>
+  </div>
+</footer>
+
+<script src="/hotel-wait.js"></script>
+<script src='/nav-auth.js'></script>
+</body>
+</html>
