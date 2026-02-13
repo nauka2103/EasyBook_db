@@ -2,7 +2,7 @@ const { MongoClient } = require('mongodb');
 const dns = require('dns');
 
 const uri = process.env.MONGO_URI;
-const dbName = process.env.DB_NAME || 'easybook_final';
+const dbName = process.env.DB_NAME || 'easybook_db';
 const dnsServers = (process.env.DNS_SERVERS || '8.8.8.8,1.1.1.1')
   .split(',')
   .map((server) => server.trim())

@@ -1,4 +1,4 @@
-# EasyBooking Report (Endterm)
+# EasyBooking Report 
 
 ## 1. Project Overview
 
